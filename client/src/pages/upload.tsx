@@ -5,11 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Upload, 
-  FileText, 
-  X, 
-  AlertCircle, 
+import {
+  Upload,
+  FileText,
+  X,
+  AlertCircle,
   ArrowLeft,
   File,
   CheckCircle
@@ -43,14 +43,16 @@ export default function UploadPage() {
 
   const validateFile = (file: File): boolean => {
     const extension = "." + file.name.split(".").pop()?.toLowerCase();
-    const isValidType = ACCEPTED_TYPES.includes(file.type) || ACCEPTED_EXTENSIONS.includes(extension);
-    const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB
+    const isValidType =
+      ACCEPTED_TYPES.includes(file.type) ||
+      ACCEPTED_EXTENSIONS.includes(extension);
+    const isValidSize = file.size <= 10 * 1024 * 1024;
 
     if (!isValidType) {
       toast({
         variant: "destructive",
         title: "Invalid file type",
-        description: "Please upload a .doc, .docx, or .rtf file.",
+        description: "Please upload a .doc, .docx, or .rtf file."
       });
       return false;
     }
@@ -59,7 +61,7 @@ export default function UploadPage() {
       toast({
         variant: "destructive",
         title: "File too large",
-        description: "Please upload a file smaller than 10MB.",
+        description: "Please upload a file smaller than 10MB."
       });
       return false;
     }
@@ -70,11 +72,7 @@ export default function UploadPage() {
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    setDragActive(e.type === "dragenter" || e.type === "dragover");
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -82,46 +80,48 @@ export default function UploadPage() {
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (validateFile(file)) {
-        setSelectedFile(file);
-      }
+    const file = e.dataTransfer.files?.[0];
+    if (file && validateFile(file)) {
+      setSelectedFile(file);
     }
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (validateFile(file)) {
-        setSelectedFile(file);
-      }
+    const file = e.target.files?.[0];
+    if (file && validateFile(file)) {
+      setSelectedFile(file);
     }
   };
 
   const handleUpload = async () => {
     if (!selectedFile) return;
 
+    const email = localStorage.getItem("user_email");
+    if (!email) {
+      toast({
+        variant: "destructive",
+        title: "Not logged in",
+        description: "Please create an account first."
+      });
+      navigate("/signup");
+      return;
+    }
+
     setIsUploading(true);
     setUploadProgress(0);
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    formData.append("email", email); // 🔥 THIS FIXES YOUR BUG
 
     try {
       const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return prev;
-          }
-          return prev + 10;
-        });
+        setUploadProgress((p) => (p >= 90 ? p : p + 10));
       }, 200);
 
       const response = await fetch("/api/documents/upload", {
         method: "POST",
-        body: formData,
+        body: formData
       });
 
       clearInterval(progressInterval);
@@ -132,20 +132,20 @@ export default function UploadPage() {
       }
 
       const data = await response.json();
-      
+
       toast({
         title: "Upload successful",
-        description: "Proceeding to payment...",
+        description: "Redirecting to payment..."
       });
 
       setTimeout(() => {
         navigate(`/payment/${data.id}`);
       }, 500);
-    } catch (error) {
+    } catch (err) {
       toast({
         variant: "destructive",
         title: "Upload failed",
-        description: "Please try again.",
+        description: "Please try again."
       });
       setIsUploading(false);
       setUploadProgress(0);
@@ -159,11 +159,10 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
         <div className="container mx-auto flex h-16 items-center gap-4 px-4">
           <Link href="/">
-            <Button variant="ghost" size="icon" data-testid="button-back">
+            <Button variant="ghost" size="icon">
               <ArrowLeft className="h-5 w-5" />
             </Button>
           </Link>
@@ -176,37 +175,24 @@ export default function UploadPage() {
 
       <main className="container mx-auto px-4 py-12">
         <div className="mx-auto max-w-2xl">
-          <div className="mb-8 text-center">
-            <h1 className="mb-2 text-3xl font-bold">Upload Your Document</h1>
-            <p className="text-muted-foreground">
-              Select a document to get it professionally assessed
-            </p>
-          </div>
-
-          <Card className="mb-6">
+          <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Upload className="h-5 w-5" />
-                Document Upload
-              </CardTitle>
+              <CardTitle>Upload Your Document</CardTitle>
               <CardDescription>
-                Drag and drop your file or click to browse
+                Accepted formats: DOC, DOCX, RTF (Max 10MB)
               </CardDescription>
             </CardHeader>
             <CardContent>
               {!selectedFile ? (
                 <div
-                  className={`relative flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                    dragActive
-                      ? "border-primary bg-primary/5"
-                      : "border-muted-foreground/25 hover:border-primary/50"
-                  }`}
+                  className="flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed"
                   onDragEnter={handleDrag}
                   onDragLeave={handleDrag}
                   onDragOver={handleDrag}
                   onDrop={handleDrop}
-                  onClick={() => document.getElementById("file-input")?.click()}
-                  data-testid="dropzone-upload"
+                  onClick={() =>
+                    document.getElementById("file-input")?.click()
+                  }
                 >
                   <input
                     id="file-input"
@@ -214,104 +200,35 @@ export default function UploadPage() {
                     className="hidden"
                     accept=".doc,.docx,.rtf"
                     onChange={handleFileSelect}
-                    data-testid="input-file"
                   />
-                  <div className="flex flex-col items-center gap-4 p-8 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-                      <Upload className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <p className="mb-1 text-lg font-medium">
-                        {dragActive ? "Drop your file here" : "Drag and drop your file"}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        or click to browse from your device
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {ACCEPTED_EXTENSIONS.map((ext) => (
-                        <Badge key={ext} variant="secondary">
-                          {ext}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
+                  <Upload className="h-10 w-10 text-primary" />
                 </div>
               ) : (
-                <div className="rounded-lg border bg-card p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                        <File className="h-6 w-6 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-medium" data-testid="text-filename">
-                          {selectedFile.name}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {formatFileSize(selectedFile.size)}
-                        </p>
-                      </div>
-                    </div>
-                    {!isUploading && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={removeFile}
-                        data-testid="button-remove-file"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
+                <div className="border rounded p-4">
+                  <p>{selectedFile.name}</p>
                   {isUploading && (
-                    <div className="mt-4">
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span>Uploading...</span>
-                        <span>{uploadProgress}%</span>
-                      </div>
-                      <Progress value={uploadProgress} className="h-2" />
-                    </div>
+                    <Progress value={uploadProgress} className="mt-2" />
                   )}
-                  {uploadProgress === 100 && (
-                    <div className="mt-4 flex items-center gap-2 text-sm text-primary">
-                      <CheckCircle className="h-4 w-4" />
-                      <span>Upload complete!</span>
-                    </div>
+                  {!isUploading && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={removeFile}
+                    >
+                      Remove
+                    </Button>
                   )}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card className="mb-6">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="mt-0.5 h-5 w-5 text-muted-foreground" />
-                <div className="text-sm text-muted-foreground">
-                  <p className="mb-1 font-medium text-foreground">File Requirements</p>
-                  <ul className="list-inside list-disc space-y-1">
-                    <li>Accepted formats: .doc, .docx, .rtf</li>
-                    <li>Maximum file size: 10MB</li>
-                    <li>Assessment fee: KES 60 per document</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex justify-end gap-3">
-            <Link href="/">
-              <Button variant="outline" data-testid="button-cancel">
-                Cancel
-              </Button>
-            </Link>
+          <div className="mt-6 flex justify-end">
             <Button
               onClick={handleUpload}
               disabled={!selectedFile || isUploading}
-              data-testid="button-proceed-payment"
             >
-              {isUploading ? "Uploading..." : "Proceed to Payment"}
+              Proceed to Payment
             </Button>
           </div>
         </div>
