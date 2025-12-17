@@ -1,13 +1,24 @@
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useRef } from "react";
 
 export default function Signup() {
   const [, setLocation] = useLocation();
+  const emailRef = useRef<HTMLInputElement>(null);
 
   function handleCreateAccount() {
-    // For now, just move user forward
-    // Later this will call a real signup API
+    const email = emailRef.current?.value;
+
+    if (!email) {
+      alert("Please enter your email address");
+      return;
+    }
+
+    // Store email for upload + payment flow
+    localStorage.setItem("user_email", email);
+
+    // Move user to upload page
     setLocation("/upload");
   }
 
@@ -20,6 +31,7 @@ export default function Signup() {
           </h2>
 
           <input
+            ref={emailRef}
             type="email"
             placeholder="Email address"
             className="w-full rounded-md border px-4 py-2"
