@@ -2,18 +2,9 @@ import { useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Upload,
-  FileText,
-  X,
-  AlertCircle,
-  ArrowLeft,
-  File,
-  CheckCircle
-} from "lucide-react";
+import { Upload, FileText, ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
 
 const ACCEPTED_TYPES = [
@@ -25,10 +16,10 @@ const ACCEPTED_TYPES = [
 
 const ACCEPTED_EXTENSIONS = [".doc", ".docx", ".rtf"];
 
-function formatFileSize(bytes: number): string {
+function formatFileSize(bytes: number) {
   if (bytes === 0) return "0 Bytes";
   const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const sizes = ["Bytes", "KB", "MB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
@@ -41,11 +32,10 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
 
-  const validateFile = (file: File): boolean => {
+  const validateFile = (file: File) => {
     const extension = "." + file.name.split(".").pop()?.toLowerCase();
     const isValidType =
-      ACCEPTED_TYPES.includes(file.type) ||
-      ACCEPTED_EXTENSIONS.includes(extension);
+      ACCEPTED_TYPES.includes(file.type) || ACCEPTED_EXTENSIONS.includes(extension);
     const isValidSize = file.size <= 10 * 1024 * 1024;
 
     if (!isValidType) {
@@ -81,16 +71,12 @@ export default function UploadPage() {
     setDragActive(false);
 
     const file = e.dataTransfer.files?.[0];
-    if (file && validateFile(file)) {
-      setSelectedFile(file);
-    }
+    if (file && validateFile(file)) setSelectedFile(file);
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && validateFile(file)) {
-      setSelectedFile(file);
-    }
+    if (file && validateFile(file)) setSelectedFile(file);
   };
 
   const handleUpload = async () => {
@@ -112,24 +98,15 @@ export default function UploadPage() {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
-    formData.append("email", email); // 🔥 THIS FIXES YOUR BUG
+    formData.append("email", email); // Important for backend
 
     try {
-      const progressInterval = setInterval(() => {
-        setUploadProgress((p) => (p >= 90 ? p : p + 10));
-      }, 200);
-
       const response = await fetch("/api/documents/upload", {
         method: "POST",
         body: formData
       });
 
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
-      if (!response.ok) {
-        throw new Error("Upload failed");
-      }
+      if (!response.ok) throw new Error("Upload failed");
 
       const data = await response.json();
 
@@ -138,9 +115,8 @@ export default function UploadPage() {
         description: "Redirecting to payment..."
       });
 
-      setTimeout(() => {
-        navigate(`/payment/${data.id}`);
-      }, 500);
+      setUploadProgress(100);
+      setTimeout(() => navigate(`/payment/${data.id}`), 500);
     } catch (err) {
       toast({
         variant: "destructive",
@@ -178,21 +154,19 @@ export default function UploadPage() {
           <Card>
             <CardHeader>
               <CardTitle>Upload Your Document</CardTitle>
-              <CardDescription>
-                Accepted formats: DOC, DOCX, RTF (Max 10MB)
-              </CardDescription>
+              <CardDescription>Accepted formats: DOC, DOCX, RTF (Max 10MB)</CardDescription>
             </CardHeader>
             <CardContent>
               {!selectedFile ? (
                 <div
-                  className="flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed"
+                  className={`flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed ${
+                    dragActive ? "border-primary" : "border-gray-300"
+                  }`}
                   onDragEnter={handleDrag}
                   onDragLeave={handleDrag}
                   onDragOver={handleDrag}
                   onDrop={handleDrop}
-                  onClick={() =>
-                    document.getElementById("file-input")?.click()
-                  }
+                  onClick={() => document.getElementById("file-input")?.click()}
                 >
                   <input
                     id="file-input"
@@ -202,19 +176,15 @@ export default function UploadPage() {
                     onChange={handleFileSelect}
                   />
                   <Upload className="h-10 w-10 text-primary" />
+                  <p className="mt-2 text-muted-foreground">Drag & drop your file here or click to select</p>
                 </div>
               ) : (
                 <div className="border rounded p-4">
                   <p>{selectedFile.name}</p>
-                  {isUploading && (
-                    <Progress value={uploadProgress} className="mt-2" />
-                  )}
+                  <p className="text-sm text-muted-foreground">{formatFileSize(selectedFile.size)}</p>
+                  {isUploading && <Progress value={uploadProgress} className="mt-2" />}
                   {!isUploading && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={removeFile}
-                    >
+                    <Button variant="ghost" size="sm" onClick={removeFile} className="mt-2">
                       Remove
                     </Button>
                   )}
@@ -224,10 +194,7 @@ export default function UploadPage() {
           </Card>
 
           <div className="mt-6 flex justify-end">
-            <Button
-              onClick={handleUpload}
-              disabled={!selectedFile || isUploading}
-            >
+            <Button onClick={handleUpload} disabled={!selectedFile || isUploading}>
               Proceed to Payment
             </Button>
           </div>
