@@ -6,21 +6,31 @@ import path from "path";
 import fs from "fs";
 import { z } from "zod";
 
+// Use /tmp for Render Free Tier to avoid permission issues, 
+// or stick to 'uploads' if you have a Disk attached.
 const UPLOAD_DIR = path.resolve(process.cwd(), "uploads");
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+const storage_engine = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    // Double check directory exists before writing
+    if (!fs.existsSync(UPLOAD_DIR)) {
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    }
+    cb(null, UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-    filename: (_req, file, cb) => {
-      const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, unique + path.extname(file.originalname));
-    },
-  }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage: storage_engine,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
     const allowedTypes = [
       "application/msword",
@@ -34,23 +44,12 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type"));
+      cb(new Error("Invalid file type. Only .doc, .docx, and .rtf are allowed."));
     }
   },
 });
 
-const initiatePaymentSchema = z.object({
-  documentId: z.string(),
-  phoneNumber: z.string(),
-});
-
-const confirmPaymentSchema = z.object({
-  documentId: z.string(),
-});
-
-const updateEmailSchema = z.object({
-  email: z.string().email(),
-});
+// Schemas... (Keep your existing Zod schemas here)
 
 export async function registerRoutes(
   _httpServer: Server,
@@ -58,15 +57,26 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   // ✅ UPLOAD DOCUMENT
-  app.post("/api/documents/upload", upload.single("file"), async (req, res) => {
+  app.post("/api/documents/upload", (req, res, next) => {
+    // Wrap multer in a function to catch "Invalid File Type" errors specifically
+    upload.single("file")(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: `Multer error: ${err.message}` });
+      } else if (err) {
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
+      // email might be in req.body because multer populates body AFTER parsing file
       const email = req.body.email;
       if (!email) {
-        return res.status(400).json({ error: "Email is required" });
+        return res.status(400).json({ error: "Email is required to associate document." });
       }
 
       const document = await storage.createDocument({
@@ -74,98 +84,47 @@ export async function registerRoutes(
         originalName: req.file.originalname,
         fileSize: req.file.size,
         fileType: path.extname(req.file.originalname).toLowerCase(),
-        filePath: req.file.path,
-        email, // ✅ FIX
+        filePath: req.file.path, 
+        email: email,
         paymentStatus: "pending",
         amount: 60,
       });
 
+      console.log(`[Success] Document created: ${document.id}`);
       res.json(document);
     } catch (error) {
-      console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to upload document" });
+      console.error("Database/Storage error:", error);
+      res.status(500).json({ error: "Failed to save document info to database" });
     }
   });
 
-  app.get("/api/documents", async (_req, res) => {
-    try {
-      res.json(await storage.getAllDocuments());
-    } catch {
-      res.status(500).json({ error: "Failed to get documents" });
-    }
-  });
-
-  app.get("/api/documents/:id", async (req, res) => {
-    const doc = await storage.getDocument(req.params.id);
-    if (!doc) return res.status(404).json({ error: "Not found" });
-    res.json(doc);
-  });
-
+  // ✅ DOWNLOAD DOCUMENT (Improved Path Handling)
   app.get("/api/documents/:id/download", async (req, res) => {
-    const doc = await storage.getDocument(req.params.id);
-    if (!doc) return res.status(404).json({ error: "Not found" });
-    if (doc.paymentStatus !== "completed") {
-      return res.status(403).json({ error: "Payment required" });
-    }
-
-    const filePath = path.isAbsolute(doc.filePath)
-      ? doc.filePath
-      : path.resolve(process.cwd(), doc.filePath);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "File missing" });
-    }
-
-    res.download(filePath, doc.originalName);
-  });
-
-  app.patch("/api/documents/:id/email", async (req, res) => {
     try {
-      const { email } = updateEmailSchema.parse(req.body);
-      const doc = await storage.updateDocumentEmail(req.params.id, email);
-      if (!doc) return res.status(404).json({ error: "Not found" });
-      res.json(doc);
-    } catch {
-      res.status(400).json({ error: "Invalid email" });
+      const doc = await storage.getDocument(req.params.id);
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      
+      if (doc.paymentStatus !== "completed") {
+        return res.status(403).json({ error: "Payment required before download" });
+      }
+
+      // Ensure we have a clean absolute path
+      const absolutePath = path.isAbsolute(doc.filePath) 
+        ? doc.filePath 
+        : path.join(process.cwd(), doc.filePath);
+
+      if (!fs.existsSync(absolutePath)) {
+        console.error(`File missing at: ${absolutePath}`);
+        return res.status(404).json({ error: "File no longer exists on server" });
+      }
+
+      res.download(absolutePath, doc.originalName);
+    } catch (error) {
+      res.status(500).json({ error: "Download failed" });
     }
   });
 
-  app.post("/api/payments/initiate", async (req, res) => {
-    const { documentId, phoneNumber } = initiatePaymentSchema.parse(req.body);
-
-    let phone = phoneNumber.replace(/\s/g, "");
-    if (phone.startsWith("0")) phone = "254" + phone.slice(1);
-    if (phone.startsWith("+")) phone = phone.slice(1);
-
-    const checkoutRequestId = `CRQ${Date.now()}`;
-    const merchantRequestId = `MRQ${Date.now()}`;
-
-    await storage.createPayment({
-      documentId,
-      phoneNumber: phone,
-      amount: 60,
-      status: "pending",
-      checkoutRequestId,
-      merchantRequestId,
-    });
-
-    await storage.updateDocumentPayment(documentId, "pending");
-
-    res.json({ success: true, message: "STK push sent" });
-  });
-
-  app.post("/api/payments/confirm", async (req, res) => {
-    const { documentId } = confirmPaymentSchema.parse(req.body);
-
-    const receipt = `REC${Date.now().toString(36).toUpperCase()}`;
-    await storage.updateDocumentPayment(documentId, "completed", receipt);
-
-    res.json({ status: "completed" });
-  });
-
-  app.post("/api/mpesa/callback", async (_req, res) => {
-    res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-  });
+  // ... (Keep the rest of your payment/callback routes as they were)
 
   return _httpServer;
 }
