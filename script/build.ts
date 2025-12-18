@@ -50,14 +50,18 @@ async function buildAll() {
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "esm",           // Changed from 'cjs' to 'esm'
+    outfile: "dist/index.js", // Changed from '.cjs' to '.js'
     define: {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
     external: externals,
     logLevel: "info",
+    // This helper ensures that __dirname and __filename work in ESM if needed
+    banner: {
+      js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+    },
   });
 }
 
