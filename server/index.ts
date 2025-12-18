@@ -2,9 +2,18 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import fs from "fs";
+import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
+
+// --- 1. PRE-FLIGHT DIRECTORY CHECK ---
+// Ensure the upload directory exists on Render's ephemeral storage
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 declare module "http" {
   interface IncomingMessage {
@@ -12,6 +21,7 @@ declare module "http" {
   }
 }
 
+// Standard JSON and URL encoded parsers
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -19,7 +29,6 @@ app.use(
     },
   }),
 );
-
 app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
@@ -29,10 +38,10 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// --- 2. LOGGING MIDDLEWARE ---
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -51,7 +60,6 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       log(logLine);
     }
   });
@@ -60,19 +68,18 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // --- 3. ROUTE REGISTRATION ---
+  // Ensure registerRoutes handles the /api/documents/upload logic
   await registerRoutes(httpServer, app);
 
+  // Global Error Handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
+    console.error(`Error: ${message}`, err); // Added console error for better debugging
     res.status(status).json({ message });
-    throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -80,11 +87,7 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "10000", 10);
   httpServer.listen(
     {
       port,
