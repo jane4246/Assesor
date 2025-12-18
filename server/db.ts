@@ -4,27 +4,23 @@ import * as schema from "@shared/schema";
 
 const { Pool } = pg;
 
+// Force a check and log the connection attempt
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  throw new Error(
-    "DATABASE_URL must be set. Check your Render Environment Variables.",
-  );
+if (!connectionString || connectionString.includes("undefined")) {
+  console.error("❌ DATABASE_URL is invalid or undefined!");
+  throw new Error("Check Render Environment Variables: DATABASE_URL is missing.");
 }
 
-/**
- * FIXED LOGIC:
- * If the connection string already contains "ssl=true", we let the 
- * connection string handle it. Otherwise, we add the required 
- * Render SSL config object.
- */
-const sslConfig = connectionString.includes("ssl=true") 
-  ? true 
-  : { rejectUnauthorized: false };
+// Log a masked version to debug the format in Render logs
+const maskedUrl = connectionString.replace(/:([^:@]+)@/, ":****@");
+console.log(`Connecting to database: ${maskedUrl.split('@')[1]}`);
 
 export const pool = new Pool({ 
-  connectionString,
-  ssl: sslConfig
+  connectionString: connectionString.trim(), // Remove any accidental hidden spaces
+  ssl: connectionString.includes("sslmode=require") || connectionString.includes("ssl=true")
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 export const db = drizzle(pool, { schema });
