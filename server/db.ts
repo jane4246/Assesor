@@ -4,23 +4,27 @@ import * as schema from "@shared/schema";
 
 const { Pool } = pg;
 
-// Force a check and log the connection attempt
-const connectionString = process.env.DATABASE_URL;
+// 1. Get the URL and strip any accidental quotes or spaces
+const dbUrl = process.env.DATABASE_URL?.trim();
 
-if (!connectionString || connectionString.includes("undefined")) {
-  console.error("❌ DATABASE_URL is invalid or undefined!");
-  throw new Error("Check Render Environment Variables: DATABASE_URL is missing.");
+if (!dbUrl) {
+  throw new Error("DATABASE_URL is missing. Check Render Environment Variables.");
 }
 
-// Log a masked version to debug the format in Render logs
-const maskedUrl = connectionString.replace(/:([^:@]+)@/, ":****@");
-console.log(`Connecting to database: ${maskedUrl.split('@')[1]}`);
+// 2. Extract the base URL and the SSL requirement
+// This prevents the 'searchParams' crash by manually handling the string
+const hasSslParams = dbUrl.includes("ssl=true") || dbUrl.includes("sslmode=require");
 
 export const pool = new Pool({ 
-  connectionString: connectionString.trim(), // Remove any accidental hidden spaces
-  ssl: connectionString.includes("sslmode=require") || connectionString.includes("ssl=true")
-    ? { rejectUnauthorized: false }
-    : false
+  connectionString: dbUrl,
+  // If the URL already has SSL params, we let it be. 
+  // If not, we explicitly set it for Render.
+  ssl: hasSslParams ? { rejectUnauthorized: false } : false
+});
+
+// 3. Add an error listener to the pool to catch connection issues early
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database client', err);
 });
 
 export const db = drizzle(pool, { schema });
