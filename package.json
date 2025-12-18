@@ -1,4 +1,7 @@
 {
+  "type": "module"
+}
+{
   "name": "rest-express",
   "version": "1.0.0",
   "type": "module",
