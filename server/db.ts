@@ -1,30 +1,31 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
+import { URL } from "url"; // Import native URL parser
 
 const { Pool } = pg;
 
-// 1. Get the URL and strip any accidental quotes or spaces
-const dbUrl = process.env.DATABASE_URL?.trim();
+// Use the URL you provided (ensure it's in your Render Env Vars)
+const connectionString = process.env.DATABASE_URL;
 
-if (!dbUrl) {
-  throw new Error("DATABASE_URL is missing. Check Render Environment Variables.");
+if (!connectionString) {
+  throw new Error("DATABASE_URL is missing! Make sure it's set in Render Environment.");
 }
 
-// 2. Extract the base URL and the SSL requirement
-// This prevents the 'searchParams' crash by manually handling the string
-const hasSslParams = dbUrl.includes("ssl=true") || dbUrl.includes("sslmode=require");
+// Manually parse to ensure it's valid
+try {
+  const dbUrl = new URL(connectionString);
+  console.log(`📡 Database connection initialized for host: ${dbUrl.hostname}`);
+} catch (e) {
+  console.error("❌ The DATABASE_URL is not a valid format!");
+}
 
 export const pool = new Pool({ 
-  connectionString: dbUrl,
-  // If the URL already has SSL params, we let it be. 
-  // If not, we explicitly set it for Render.
-  ssl: hasSslParams ? { rejectUnauthorized: false } : false
-});
-
-// 3. Add an error listener to the pool to catch connection issues early
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle database client', err);
+  connectionString: connectionString,
+  // Force SSL for Render internal/external connections
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 export const db = drizzle(pool, { schema });
