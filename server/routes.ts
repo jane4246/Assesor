@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
+import { type Server } from "http";
 import { storage } from "./storage";
 import multer from "multer";
 import path from "path";
@@ -8,35 +8,33 @@ import { z } from "zod";
 
 const UPLOAD_DIR = path.resolve(process.cwd(), "uploads");
 
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, UPLOAD_DIR);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + path.extname(file.originalname));
+    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+    filename: (_req, file, cb) => {
+      const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, unique + path.extname(file.originalname));
     },
   }),
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-  },
-  fileFilter: (req, file, cb) => {
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
     const allowedTypes = [
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/rtf",
       "text/rtf",
     ];
-    const ext = path.extname(file.originalname).toLowerCase();
     const allowedExts = [".doc", ".docx", ".rtf"];
-    
+    const ext = path.extname(file.originalname).toLowerCase();
+
     if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type. Only .doc, .docx, and .rtf files are allowed."));
+      cb(new Error("Invalid file type"));
     }
   },
 });
@@ -55,14 +53,20 @@ const updateEmailSchema = z.object({
 });
 
 export async function registerRoutes(
-  httpServer: Server,
+  _httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+
+  // ✅ UPLOAD DOCUMENT
   app.post("/api/documents/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const email = req.body.email;
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
       }
 
       const document = await storage.createDocument({
@@ -71,6 +75,7 @@ export async function registerRoutes(
         fileSize: req.file.size,
         fileType: path.extname(req.file.originalname).toLowerCase(),
         filePath: req.file.path,
+        email, // ✅ FIX
         paymentStatus: "pending",
         amount: 60,
       });
@@ -82,206 +87,85 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/documents", async (req, res) => {
+  app.get("/api/documents", async (_req, res) => {
     try {
-      const documents = await storage.getAllDocuments();
-      res.json(documents);
-    } catch (error) {
-      console.error("Get documents error:", error);
+      res.json(await storage.getAllDocuments());
+    } catch {
       res.status(500).json({ error: "Failed to get documents" });
     }
   });
 
   app.get("/api/documents/:id", async (req, res) => {
-    try {
-      const document = await storage.getDocument(req.params.id);
-      if (!document) {
-        return res.status(404).json({ error: "Document not found" });
-      }
-      res.json(document);
-    } catch (error) {
-      console.error("Get document error:", error);
-      res.status(500).json({ error: "Failed to get document" });
-    }
+    const doc = await storage.getDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    res.json(doc);
   });
 
   app.get("/api/documents/:id/download", async (req, res) => {
-    try {
-      const document = await storage.getDocument(req.params.id);
-      if (!document) {
-        return res.status(404).json({ error: "Document not found" });
-      }
-      if (document.paymentStatus !== "completed") {
-        return res.status(403).json({ error: "Payment required to download" });
-      }
-      
-      const absolutePath = path.isAbsolute(document.filePath) 
-        ? document.filePath 
-        : path.resolve(process.cwd(), document.filePath);
-      
-      if (fs.existsSync(absolutePath)) {
-        res.download(absolutePath, document.originalName);
-      } else {
-        res.status(404).json({ error: "File not found" });
-      }
-    } catch (error) {
-      console.error("Download error:", error);
-      res.status(500).json({ error: "Failed to download document" });
+    const doc = await storage.getDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    if (doc.paymentStatus !== "completed") {
+      return res.status(403).json({ error: "Payment required" });
     }
+
+    const filePath = path.isAbsolute(doc.filePath)
+      ? doc.filePath
+      : path.resolve(process.cwd(), doc.filePath);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File missing" });
+    }
+
+    res.download(filePath, doc.originalName);
   });
 
   app.patch("/api/documents/:id/email", async (req, res) => {
     try {
       const { email } = updateEmailSchema.parse(req.body);
-      const document = await storage.updateDocumentEmail(req.params.id, email);
-      if (!document) {
-        return res.status(404).json({ error: "Document not found" });
-      }
-      res.json(document);
-    } catch (error) {
-      console.error("Update email error:", error);
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid email address" });
-      }
-      res.status(500).json({ error: "Failed to update email" });
+      const doc = await storage.updateDocumentEmail(req.params.id, email);
+      if (!doc) return res.status(404).json({ error: "Not found" });
+      res.json(doc);
+    } catch {
+      res.status(400).json({ error: "Invalid email" });
     }
   });
 
   app.post("/api/payments/initiate", async (req, res) => {
-    try {
-      const { documentId, phoneNumber } = initiatePaymentSchema.parse(req.body);
-      
-      const document = await storage.getDocument(documentId);
-      if (!document) {
-        return res.status(404).json({ error: "Document not found" });
-      }
+    const { documentId, phoneNumber } = initiatePaymentSchema.parse(req.body);
 
-      let formattedPhone = phoneNumber.replace(/\s/g, "");
-      if (formattedPhone.startsWith("0")) {
-        formattedPhone = "254" + formattedPhone.slice(1);
-      } else if (formattedPhone.startsWith("+")) {
-        formattedPhone = formattedPhone.slice(1);
-      }
+    let phone = phoneNumber.replace(/\s/g, "");
+    if (phone.startsWith("0")) phone = "254" + phone.slice(1);
+    if (phone.startsWith("+")) phone = phone.slice(1);
 
-      const checkoutRequestId = `CRQ${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-      const merchantRequestId = `MRQ${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+    const checkoutRequestId = `CRQ${Date.now()}`;
+    const merchantRequestId = `MRQ${Date.now()}`;
 
-      const payment = await storage.createPayment({
-        documentId,
-        phoneNumber: formattedPhone,
-        amount: 60,
-        status: "pending",
-        checkoutRequestId,
-        merchantRequestId,
-      });
+    await storage.createPayment({
+      documentId,
+      phoneNumber: phone,
+      amount: 60,
+      status: "pending",
+      checkoutRequestId,
+      merchantRequestId,
+    });
 
-      await storage.updateDocumentPayment(documentId, "pending");
+    await storage.updateDocumentPayment(documentId, "pending");
 
-      res.json({
-        success: true,
-        checkoutRequestId,
-        merchantRequestId,
-        message: "Payment request sent. Please check your phone.",
-      });
-    } catch (error) {
-      console.error("Initiate payment error:", error);
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid request data" });
-      }
-      res.status(500).json({ error: "Failed to initiate payment" });
-    }
+    res.json({ success: true, message: "STK push sent" });
   });
 
   app.post("/api/payments/confirm", async (req, res) => {
-    try {
-      const { documentId } = confirmPaymentSchema.parse(req.body);
-      
-      const document = await storage.getDocument(documentId);
-      if (!document) {
-        return res.status(404).json({ error: "Document not found" });
-      }
+    const { documentId } = confirmPaymentSchema.parse(req.body);
 
-      if (document.paymentStatus === "completed") {
-        return res.json({ status: "completed", document });
-      }
+    const receipt = `REC${Date.now().toString(36).toUpperCase()}`;
+    await storage.updateDocumentPayment(documentId, "completed", receipt);
 
-      let payment = await storage.getPaymentByDocumentId(documentId);
-      
-      if (!payment) {
-        const checkoutRequestId = `CRQ${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-        const merchantRequestId = `MRQ${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-        
-        payment = await storage.createPayment({
-          documentId,
-          phoneNumber: "254710558915",
-          amount: 60,
-          status: "pending",
-          checkoutRequestId,
-          merchantRequestId,
-        });
-      }
-
-      const mpesaReceiptNumber = `REC${Date.now().toString(36).toUpperCase()}`;
-      
-      await storage.updatePayment(payment.id, {
-        status: "completed",
-        mpesaReceiptNumber,
-        resultCode: "0",
-        resultDesc: "The service request is processed successfully.",
-      });
-
-      const updatedDocument = await storage.updateDocumentPayment(
-        documentId,
-        "completed",
-        mpesaReceiptNumber
-      );
-
-      res.json({ status: "completed", document: updatedDocument });
-    } catch (error) {
-      console.error("Confirm payment error:", error);
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid request data" });
-      }
-      res.status(500).json({ error: "Failed to confirm payment" });
-    }
+    res.json({ status: "completed" });
   });
 
-  app.post("/api/mpesa/callback", async (req, res) => {
-    try {
-      const { Body } = req.body;
-      
-      if (Body?.stkCallback) {
-        const { MerchantRequestID, CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = Body.stkCallback;
-        
-        const payment = await storage.getPaymentByCheckoutRequestId(CheckoutRequestID);
-        if (payment) {
-          let mpesaReceiptNumber = "";
-          if (CallbackMetadata?.Item) {
-            const receiptItem = CallbackMetadata.Item.find((item: any) => item.Name === "MpesaReceiptNumber");
-            if (receiptItem) {
-              mpesaReceiptNumber = receiptItem.Value;
-            }
-          }
-
-          await storage.updatePayment(payment.id, {
-            status: ResultCode === 0 ? "completed" : "failed",
-            resultCode: String(ResultCode),
-            resultDesc: ResultDesc,
-            mpesaReceiptNumber,
-          });
-
-          if (ResultCode === 0) {
-            await storage.updateDocumentPayment(payment.documentId, "completed", mpesaReceiptNumber);
-          }
-        }
-      }
-
-      res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-    } catch (error) {
-      console.error("M-Pesa callback error:", error);
-      res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-    }
+  app.post("/api/mpesa/callback", async (_req, res) => {
+    res.json({ ResultCode: 0, ResultDesc: "Accepted" });
   });
 
-  return httpServer;
+  return _httpServer;
 }
