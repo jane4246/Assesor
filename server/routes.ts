@@ -75,5 +75,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ✅ ADD THIS: DOCUMENT RETRIEVAL ENDPOINT (Required by payment page)
+  app.get("/api/documents/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      console.log(`Fetching document with ID: ${id}`);
+      
+      const document = await storage.getDocument(id);
+      
+      if (!document) {
+        console.log(`Document not found for ID: ${id}`);
+        return res.status(404).json({ error: "Document not found" });
+      }
+      
+      console.log(`Document found: ${document.id}`);
+      res.json(document);
+    } catch (error: any) {
+      console.error("Error fetching document:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   return httpServer;
 }
